@@ -14,7 +14,7 @@ services:
         restart: unless-stopped
 
     caddy:
-        image: caddy:2.8.4
+        image: caddy:2.11.4
         container_name: screensy-caddy
         ports:
             - "80:80"
@@ -26,7 +26,7 @@ services:
         restart: unless-stopped
 
     turn:
-        image: coturn/coturn:4.6.2
+        image: coturn/coturn:4.16.0
         container_name: screensy-turn
         # Use the host network directly as Docker performs badly with large port ranges.
         network_mode: host

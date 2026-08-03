@@ -1,4 +1,4 @@
-FROM node:22.6-alpine3.19 AS builder
+FROM node:24.18.1-alpine3.24 AS builder
 
 WORKDIR /home/node/app
 
@@ -11,7 +11,7 @@ COPY package-lock.json ./
 RUN npm install --only=development
 RUN npx tsc
 
-FROM node:22.6-alpine3.19
+FROM node:24.18.1-alpine3.24
 
 COPY --from=builder /home/node/app/server.js ./
 COPY --from=builder /home/node/app/server.js.map ./

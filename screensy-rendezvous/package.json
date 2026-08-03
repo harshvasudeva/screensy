@@ -13,11 +13,11 @@
     "license": "GPL-3.0-or-later",
     "homepage": "https://github.com/screensy/screensy#readme",
     "devDependencies": {
-        "@types/node": "^22.1.0",
-        "@types/ws": "^8.5.12",
-        "typescript": "^5.5.4"
+        "@types/node": "^24.13.3",
+        "@types/ws": "^8.18.1",
+        "typescript": "^7.0.2"
     },
     "dependencies": {
-        "ws": "^8.18.0"
+        "ws": "^8.21.1"
     }
 }
