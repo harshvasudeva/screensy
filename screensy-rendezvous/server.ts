@@ -1,3 +1,4 @@
+import { IncomingMessage } from "http";
 import { WebSocket, WebSocketServer, RawData } from "ws";
 import {
     MAX_CONNECTIONS,
@@ -13,6 +14,8 @@ import {
     isViewerWebRtcMessage,
     parseJsonMessage,
 } from "./protocol";
+import { clientIp, RateLimiter } from "./ratelimit";
+import { presenterTokenDigest } from "./token";
 import { isUsableTurnSecret, mintTurnCredentials } from "./turn";
 
 const PORT = Number(process.env.PORT) || 4000;
@@ -46,13 +49,16 @@ function turnFields(): { turnUsername?: string; turnCredential?: string } {
 export class Server {
     private rooms = new Map<string, Room>();
     private connections = 0;
+    private readonly limiter = new RateLimiter();
 
     get roomCount(): number {
         return this.rooms.size;
     }
 
-    onConnection(socket: WebSocket): void {
-        if (this.connections >= MAX_CONNECTIONS) {
+    onConnection(socket: WebSocket, req: IncomingMessage): void {
+        const ip = clientIp(req);
+
+        if (this.connections >= MAX_CONNECTIONS || !this.limiter.addConnection(ip)) {
             socket.close(1013, "server busy");
             return;
         }
@@ -68,6 +74,7 @@ export class Server {
 
         socket.on("close", () => {
             this.connections -= 1;
+            this.limiter.dropConnection(ip);
             clearTimeout(joinTimer);
         });
 
@@ -80,32 +87,44 @@ export class Server {
             clearTimeout(joinTimer);
             socket.off("message", onJoin);
 
+            if (!this.limiter.allowJoin(ip)) {
+                safeSend(socket, { type: "error", reason: "rate limited" });
+                socket.close(1008, "rate limited");
+                return;
+            }
+
             const existing = this.rooms.get(message.roomId);
             if (existing) {
                 existing.addViewer(socket);
                 return;
             }
 
-            if (this.rooms.size >= MAX_ROOMS) {
+            if (!message.presenterToken) {
+                safeSend(socket, { type: "error", reason: "no such room" });
+                socket.close(1008, "no such room");
+                return;
+            }
+
+            if (this.rooms.size >= MAX_ROOMS || !this.limiter.allowCreate(ip)) {
                 safeSend(socket, { type: "error", reason: "server busy" });
                 socket.close(1013, "server busy");
                 return;
             }
 
-            this.newRoom(message.roomId, socket);
+            this.newRoom(message.roomId, socket, message.presenterToken);
         };
 
         socket.on("message", onJoin);
     }
 
-    newRoom(roomId: string, broadcaster: WebSocket): void {
+    newRoom(roomId: string, broadcaster: WebSocket, presenterToken: string): void {
         const existing = this.rooms.get(roomId);
         if (existing) {
             existing.addViewer(broadcaster);
             return;
         }
 
-        const room = new Room(broadcaster);
+        const room = new Room(broadcaster, presenterTokenDigest(presenterToken));
         this.rooms.set(roomId, room);
         broadcaster.on("close", () => this.closeRoom(roomId));
         console.log("room created");
@@ -126,7 +145,10 @@ class Room {
     private counter = 0;
     private readonly viewers: { [id: string]: WebSocket } = {};
 
-    constructor(private broadcaster: WebSocket) {
+    constructor(
+        private broadcaster: WebSocket,
+        _presenterDigest: Buffer
+    ) {
         this.broadcaster.on("message", (data) => {
             const message = parseJsonMessage(data.toString());
             this.handleBroadcasterMessage(message);
@@ -224,6 +246,12 @@ export function start(port: number = PORT): WebSocketServer {
     }
 
     const origin = allowedOrigin();
+    if (!origin && process.env.ALLOW_EMPTY_ORIGIN !== "1") {
+        throw new Error(
+            "ALLOWED_ORIGIN must be set to the public HTTPS origin, e.g. https://example.com"
+        );
+    }
+
     const server = new Server();
     const socket = new WebSocketServer({
         port,
@@ -238,7 +266,9 @@ export function start(port: number = PORT): WebSocketServer {
         },
     });
 
-    socket.on("connection", (ws: WebSocket) => server.onConnection(ws));
+    socket.on("connection", (ws: WebSocket, req: IncomingMessage) =>
+        server.onConnection(ws, req)
+    );
     console.log("Server started on port " + port);
     return socket;
 }

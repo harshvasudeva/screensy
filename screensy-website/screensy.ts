@@ -26,6 +26,7 @@
 interface MessageJoin {
     type: "join";
     roomId: string;
+    presenterToken?: string;
 }
 
 interface TurnFields {
@@ -263,7 +264,7 @@ class Broadcaster implements Client {
                 } else if (sender.track.kind === "video") {
                     // @ts-ignore
                     rtcSendParameters.encodings[0].maxFramerate = 30;
-                    rtcSendParameters.encodings[0].maxBitrate = 100000000; // 100 Mbps
+                    rtcSendParameters.encodings[0].maxBitrate = 8000000;
                 }
 
                 await sender.setParameters(rtcSendParameters);
@@ -465,6 +466,7 @@ class Viewer implements Client {
 
 class Room {
     private readonly roomId: string;
+    private readonly presenterToken: string | undefined;
     private readonly videoElement: HTMLVideoElement;
     private readonly webSocket: WebSocket;
     private readonly sendMessage: MessageSender;
@@ -474,9 +476,11 @@ class Room {
      * Room constructor.
      *
      * @param roomId The ID of this room
+     * @param presenterToken Secret that creates the room; omit for viewers
      */
-    constructor(roomId: string) {
+    constructor(roomId: string, presenterToken?: string) {
         this.roomId = roomId;
+        this.presenterToken = presenterToken;
         this.videoElement = <HTMLVideoElement>document.getElementById("stream");
 
         const webSocketProtocol =
@@ -560,6 +564,7 @@ class Room {
         await this.sendMessage({
             type: "join",
             roomId: this.roomId,
+            ...(this.presenterToken ? { presenterToken: this.presenterToken } : {}),
         });
     }
 
@@ -614,9 +619,23 @@ class Room {
         };
 
         document.body.prepend(counterElement);
+        this.showViewerLink();
         this.videoElement.srcObject = mediaStream;
 
         return broadcaster;
+    }
+
+    private showViewerLink(): void {
+        const existing = document.getElementById("viewer-link");
+        if (existing) {
+            return;
+        }
+
+        const link = document.createElement("p");
+        link.id = "viewer-link";
+        link.innerText =
+            location.origin + location.pathname + "#" + this.roomId;
+        document.body.prepend(link);
     }
 
     /**
@@ -688,14 +707,24 @@ function parseSocketPayload(data: unknown): (Message & TurnFields) | null {
     }
 }
 
-function isUsableRoomId(roomId: string): boolean {
-    return /^[A-Za-z0-9_-]{16,128}$/.test(roomId);
+function parseRoomHash(
+    raw: string
+): { roomId: string; presenterToken?: string } | null {
+    const parts = raw.split(".");
+    if (parts.length === 1 && isHex32(parts[0])) {
+        return { roomId: parts[0] };
+    }
+    if (parts.length === 2 && isHex32(parts[0]) && isHex32(parts[1])) {
+        return { roomId: parts[0], presenterToken: parts[1] };
+    }
+    return null;
 }
 
-/**
- * 128-bit unguessable room id (hex). The URL fragment is the access capability.
- */
-function generateRoomId(): string {
+function isHex32(value: string): boolean {
+    return /^[a-f0-9]{32}$/.test(value);
+}
+
+function generateHexId(): string {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
@@ -704,10 +733,10 @@ function generateRoomId(): string {
 }
 
 async function main(_event: Event) {
-    const currentId = window.location.hash.substring(1);
+    const parsed = parseRoomHash(window.location.hash.substring(1));
 
-    if (!isUsableRoomId(currentId)) {
-        window.location.replace("#" + generateRoomId());
+    if (parsed == null) {
+        window.location.replace("#" + generateHexId() + "." + generateHexId());
         return;
     }
 
@@ -730,7 +759,7 @@ async function main(_event: Event) {
         return;
     }
 
-    const room = new Room(currentId);
+    const room = new Room(parsed.roomId, parsed.presenterToken);
     await room.join();
 }
 

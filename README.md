@@ -13,13 +13,13 @@ directly sent from the browser of the broadcaster to the browser of each viewer.
 All traffic (between rendezvous and browser and between browsers) is encrypted
 by default.
 
-A room URL is an access token: anyone who has it can view the screen. New rooms
-use a 128-bit random id. Copy `.env.example` to `.env` and set `TURN_AUTH_SECRET`
-to a long unique value (at least 24 characters). `docker compose up` will not
-start without it. For a public site also set `ALLOWED_ORIGIN` to your HTTPS
-origin (for example `https://example.com`) so other websites cannot open a
-signaling WebSocket in a visitor’s browser. HTTP Basic Auth on Caddy does
-**not** protect the TURN port.
+The presenter URL looks like `/#<room>.<presenterToken>`. Only that token can
+**create** the room. Share the **viewer** URL shown on screen (`/#<room>` only).
+Anyone with the viewer link can watch while the room exists. Copy `.env.example`
+to `.env` and set `TURN_AUTH_SECRET` (at least 24 characters) and
+`ALLOWED_ORIGIN` (for local Docker: `https://localhost`; for production:
+`https://your.domain`). `docker compose up` will not start without both. HTTP
+Basic Auth on Caddy does **not** protect the TURN port.
 
 There are two ways to set up screensy. If you don't know which one to choose, we
 recommend using Docker.
@@ -39,8 +39,10 @@ recommend using Docker.
         git clone https://github.com/screensy/screensy.git
         cd screensy/
 
-4.  Copy `.env.example` to `.env` and set `TURN_AUTH_SECRET` to a long random
-    string. The rendezvous server and Coturn must use the same value.
+4.  Copy `.env.example` to `.env`. Set `TURN_AUTH_SECRET` to a long random
+    string and `ALLOWED_ORIGIN` to the HTTPS origin browsers will use (for a
+    local Caddy deploy that is `https://localhost`). The rendezvous server and
+    Coturn must use the same TURN secret.
 
 5.  Change the first line of the included Caddyfile to your domain. For example
     if you want to host screensy on the domain "example.com", use this
@@ -61,11 +63,13 @@ recommend using Docker.
             reverse_proxy website:8080
 
             @rendezvous {
-                header Connection *Upgrade*
                 header Upgrade websocket
             }
 
-            reverse_proxy @rendezvous rendezvous:4000
+            reverse_proxy @rendezvous rendezvous:4000 {
+                header_up X-Forwarded-For {http.request.remote.host}
+                header_up X-Real-IP {http.request.remote.host}
+            }
         }
 
 6.  _Optional_: password-protect your screensy instance using the method

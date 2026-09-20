@@ -16,7 +16,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 -   Cap rooms, viewers, connections, and WebSocket payload size.
 -   Serve only `screensy.js` and `styles.css` from the website process.
 -   Close WebSocket connections that never send a valid `join`.
--   Show an error popup when the signaling server rejects a session.
+-   Require a presenter token to create a room; show the viewer-only link to the broadcaster.
+-   Rate-limit joins and connections per forwarded client IP.
 
 ### Changed
 
@@ -30,7 +31,9 @@ The format is based on [Keep a Changelog], and this project adheres to
     files needed for screensy are exposed through the browser.
 -   Replace the static `screensy:screensy` TURN password.
 -   Deny TURN relays to loopback, private, and IPv6 ULA/link-local ranges.
--   Refuse to start with a missing or placeholder `TURN_AUTH_SECRET`.
+-   Refuse to start without `TURN_AUTH_SECRET` and `ALLOWED_ORIGIN`.
+-   Write the TURN secret to a temp file instead of the Coturn process arguments.
+-   Cap TURN bandwidth and allocations (`max-bps`, `user-quota`, `total-quota`).
 -   Ignore invalid JSON on the client as well as the server.
 -   Stop throwing on concurrent join / missing viewer disconnect.
 

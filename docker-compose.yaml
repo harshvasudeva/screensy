@@ -4,7 +4,7 @@ services:
         build: ./screensy-rendezvous
         environment:
             TURN_AUTH_SECRET: ${TURN_AUTH_SECRET:?Set TURN_AUTH_SECRET in .env — see .env.example}
-            ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+            ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:?Set ALLOWED_ORIGIN in .env — e.g. https://localhost}
         security_opt:
             - no-new-privileges:true
         read_only: true
@@ -50,11 +50,14 @@ services:
         container_name: screensy-turn
         # Host network is required for the UDP relay port range.
         network_mode: host
+        environment:
+            TURN_AUTH_SECRET: ${TURN_AUTH_SECRET:?Set TURN_AUTH_SECRET in .env — see .env.example}
         volumes:
             - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
-        command:
-            - "--log-file=stdout"
-            - "--static-auth-secret=${TURN_AUTH_SECRET:?Set TURN_AUTH_SECRET in .env — see .env.example}"
+            - ./scripts/coturn-start.sh:/usr/local/bin/coturn-start.sh:ro
+        entrypoint: ["/bin/bash", "/usr/local/bin/coturn-start.sh"]
+        tmpfs:
+            - /tmp
         security_opt:
             - no-new-privileges:true
         restart: unless-stopped

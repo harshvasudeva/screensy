@@ -5,7 +5,7 @@
     "scripts": {
         "start": "node server.js",
         "build": "tsc",
-        "test": "tsc && node --test protocol.test.js turn.test.js server.test.js"
+        "test": "tsc && node --test protocol.test.js turn.test.js token.test.js server.test.js"
     },
     "repository": {
         "type": "git",

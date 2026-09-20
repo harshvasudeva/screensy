@@ -6,6 +6,11 @@ import { start } from "./server";
 process.env.TURN_AUTH_SECRET =
     process.env.TURN_AUTH_SECRET || "unit-test-secret-not-for-production";
 process.env.JOIN_TIMEOUT_MS = process.env.JOIN_TIMEOUT_MS || "50";
+process.env.ALLOW_EMPTY_ORIGIN = "1";
+process.env.RATE_LIMIT_DISABLED = "1";
+
+const ROOM_ID = "0123456789abcdef0123456789abcdef";
+const PRESENTER_TOKEN = "fedcba9876543210fedcba9876543210";
 
 function onceOpen(socket: WebSocket): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -29,14 +34,20 @@ function onceClose(socket: WebSocket): Promise<number> {
     });
 }
 
-test("first joiner is broadcaster; second is viewer; invalid json is ignored", async () => {
+test("presenter token creates the room; viewers join without it", async () => {
     const wss = start(0);
     const port = (wss.address() as { port: number }).port;
     const url = `ws://127.0.0.1:${port}`;
 
     const a = new WebSocket(url);
     await onceOpen(a);
-    a.send(JSON.stringify({ type: "join", roomId: "abcdefghijklmnop" }));
+    a.send(
+        JSON.stringify({
+            type: "join",
+            roomId: ROOM_ID,
+            presenterToken: PRESENTER_TOKEN,
+        })
+    );
     const first = (await onceMessage(a)) as {
         type: string;
         turnUsername?: string;
@@ -46,7 +57,7 @@ test("first joiner is broadcaster; second is viewer; invalid json is ignored", a
 
     const b = new WebSocket(url);
     await onceOpen(b);
-    b.send(JSON.stringify({ type: "join", roomId: "abcdefghijklmnop" }));
+    b.send(JSON.stringify({ type: "join", roomId: ROOM_ID }));
     const [viewerHello, broadcasterNotice] = await Promise.all([
         onceMessage(b),
         onceMessage(a),
@@ -55,12 +66,21 @@ test("first joiner is broadcaster; second is viewer; invalid json is ignored", a
     assert.equal((broadcasterNotice as { type: string }).type, "viewer");
 
     a.send("{not-json");
-    a.send(JSON.stringify({ type: "join", roomId: "no" }));
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
     a.close();
     b.close();
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
+});
+
+test("viewers cannot create a room without the presenter token", async () => {
+    const wss = start(0);
+    const port = (wss.address() as { port: number }).port;
+    const viewer = new WebSocket(`ws://127.0.0.1:${port}`);
+    await onceOpen(viewer);
+    viewer.send(JSON.stringify({ type: "join", roomId: ROOM_ID }));
+    const message = (await onceMessage(viewer)) as { type: string; reason?: string };
+    assert.equal(message.type, "error");
+    assert.equal(message.reason, "no such room");
+    await onceClose(viewer);
     await new Promise<void>((resolve) => wss.close(() => resolve()));
 });
 
