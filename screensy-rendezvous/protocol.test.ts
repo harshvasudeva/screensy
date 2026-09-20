@@ -19,7 +19,8 @@ test("accepts unguessable hex room ids and legacy word-list names", () => {
 });
 
 test("join messages require a valid roomId", () => {
-    assert.equal(isJoinMessage({ type: "join", roomId: "abcdefgh" }), true);
+    assert.equal(isValidRoomId("abcdefgh"), false);
+    assert.equal(isJoinMessage({ type: "join", roomId: "abcdefghijklmnop" }), true);
     assert.equal(isJoinMessage({ type: "join", roomId: "x" }), false);
     assert.equal(isJoinMessage({ type: "viewer" }), false);
 });

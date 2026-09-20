@@ -1,6 +1,17 @@
 import { createHmac } from "crypto";
 
-const DEFAULT_TTL_SECONDS = 6 * 60 * 60;
+const DEFAULT_TTL_SECONDS = 60 * 60;
+
+const BLOCKED_SECRETS = new Set([
+    "",
+    "screensy",
+    "screensy-change-me-in-production",
+    "replace-with-a-long-random-string",
+]);
+
+export function isUsableTurnSecret(secret: string): boolean {
+    return secret.length >= 24 && !BLOCKED_SECRETS.has(secret);
+}
 
 export function mintTurnCredentials(
     secret: string,

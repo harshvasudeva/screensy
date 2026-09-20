@@ -1,9 +1,14 @@
 export const MAX_MESSAGE_BYTES = 256 * 1024;
 export const MAX_ROOM_ID_LENGTH = 128;
-export const MIN_ROOM_ID_LENGTH = 8;
+export const MIN_ROOM_ID_LENGTH = 16;
 export const MAX_VIEWERS_PER_ROOM = 32;
 export const MAX_ROOMS = 256;
 export const MAX_CONNECTIONS = 512;
+
+export function joinTimeoutMs(): number {
+    const parsed = Number(process.env.JOIN_TIMEOUT_MS);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 15_000;
+}
 
 const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 

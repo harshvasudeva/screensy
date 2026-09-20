@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WebSocket, WebSocketServer } from "ws";
+import { WebSocket } from "ws";
 import { start } from "./server";
+
+process.env.TURN_AUTH_SECRET =
+    process.env.TURN_AUTH_SECRET || "unit-test-secret-not-for-production";
+process.env.JOIN_TIMEOUT_MS = process.env.JOIN_TIMEOUT_MS || "50";
 
 function onceOpen(socket: WebSocket): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -19,6 +23,12 @@ function onceMessage(socket: WebSocket): Promise<unknown> {
     });
 }
 
+function onceClose(socket: WebSocket): Promise<number> {
+    return new Promise((resolve) => {
+        socket.once("close", (code) => resolve(code));
+    });
+}
+
 test("first joiner is broadcaster; second is viewer; invalid json is ignored", async () => {
     const wss = start(0);
     const port = (wss.address() as { port: number }).port;
@@ -27,8 +37,12 @@ test("first joiner is broadcaster; second is viewer; invalid json is ignored", a
     const a = new WebSocket(url);
     await onceOpen(a);
     a.send(JSON.stringify({ type: "join", roomId: "abcdefghijklmnop" }));
-    const first = await onceMessage(a);
-    assert.equal((first as { type: string }).type, "broadcast");
+    const first = (await onceMessage(a)) as {
+        type: string;
+        turnUsername?: string;
+    };
+    assert.equal(first.type, "broadcast");
+    assert.equal(typeof first.turnUsername, "string");
 
     const b = new WebSocket(url);
     await onceOpen(b);
@@ -47,5 +61,15 @@ test("first joiner is broadcaster; second is viewer; invalid json is ignored", a
 
     a.close();
     b.close();
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
+});
+
+test("idle connections are closed before they consume a join slot forever", async () => {
+    const wss = start(0);
+    const port = (wss.address() as { port: number }).port;
+    const idle = new WebSocket(`ws://127.0.0.1:${port}`);
+    await onceOpen(idle);
+    const code = await onceClose(idle);
+    assert.equal(code, 1008);
     await new Promise<void>((resolve) => wss.close(() => resolve()));
 });

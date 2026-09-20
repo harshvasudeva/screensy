@@ -4,6 +4,7 @@ import {
     MAX_ROOMS,
     MAX_MESSAGE_BYTES,
     MAX_VIEWERS_PER_ROOM,
+    joinTimeoutMs,
     isBroadcasterWebRtcMessage,
     isFromBroadcasterMessage,
     isFromViewerMessage,
@@ -12,11 +13,17 @@ import {
     isViewerWebRtcMessage,
     parseJsonMessage,
 } from "./protocol";
-import { mintTurnCredentials } from "./turn";
+import { isUsableTurnSecret, mintTurnCredentials } from "./turn";
 
 const PORT = Number(process.env.PORT) || 4000;
-const TURN_AUTH_SECRET = process.env.TURN_AUTH_SECRET || "";
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "";
+
+function turnAuthSecret(): string {
+    return process.env.TURN_AUTH_SECRET || "";
+}
+
+function allowedOrigin(): string {
+    return process.env.ALLOWED_ORIGIN || "";
+}
 
 function safeSend(socket: WebSocket, payload: unknown): void {
     if (socket.readyState === WebSocket.OPEN) {
@@ -25,10 +32,11 @@ function safeSend(socket: WebSocket, payload: unknown): void {
 }
 
 function turnFields(): { turnUsername?: string; turnCredential?: string } {
-    if (!TURN_AUTH_SECRET) {
+    const secret = turnAuthSecret();
+    if (!isUsableTurnSecret(secret)) {
         return {};
     }
-    const minted = mintTurnCredentials(TURN_AUTH_SECRET);
+    const minted = mintTurnCredentials(secret);
     return {
         turnUsername: minted.username,
         turnCredential: minted.credential,
@@ -50,8 +58,17 @@ export class Server {
         }
 
         this.connections += 1;
+
+        const joinTimer = setTimeout(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.close(1008, "join timeout");
+            }
+        }, joinTimeoutMs());
+        joinTimer.unref();
+
         socket.on("close", () => {
             this.connections -= 1;
+            clearTimeout(joinTimer);
         });
 
         const onJoin = (data: RawData): void => {
@@ -60,6 +77,7 @@ export class Server {
                 return;
             }
 
+            clearTimeout(joinTimer);
             socket.off("message", onJoin);
 
             const existing = this.rooms.get(message.roomId);
@@ -90,7 +108,7 @@ export class Server {
         const room = new Room(broadcaster);
         this.rooms.set(roomId, room);
         broadcaster.on("close", () => this.closeRoom(roomId));
-        console.log("room created", roomId);
+        console.log("room created");
     }
 
     closeRoom(roomId: string): void {
@@ -100,7 +118,7 @@ export class Server {
         }
         room.closeRoom();
         this.rooms.delete(roomId);
-        console.log("room closed", roomId);
+        console.log("room closed");
     }
 }
 
@@ -198,23 +216,25 @@ class Room {
 }
 
 export function start(port: number = PORT): WebSocketServer {
-    if (!TURN_AUTH_SECRET) {
-        console.warn(
-            "TURN_AUTH_SECRET is unset; clients will use STUN only and TURN relay will not authenticate."
+    const secret = turnAuthSecret();
+    if (!isUsableTurnSecret(secret)) {
+        throw new Error(
+            "TURN_AUTH_SECRET must be set to a unique value at least 24 characters long (see .env.example)."
         );
     }
 
+    const origin = allowedOrigin();
     const server = new Server();
     const socket = new WebSocketServer({
         port,
         maxPayload: MAX_MESSAGE_BYTES,
         perMessageDeflate: false,
         verifyClient: (info, done) => {
-            if (!ALLOWED_ORIGIN) {
+            if (!origin) {
                 done(true);
                 return;
             }
-            done(info.origin === ALLOWED_ORIGIN);
+            done(info.origin === origin);
         },
     });
 
@@ -224,5 +244,10 @@ export function start(port: number = PORT): WebSocketServer {
 }
 
 if (require.main === module) {
-    start();
+    try {
+        start();
+    } catch (err) {
+        console.error(err instanceof Error ? err.message : err);
+        process.exit(1);
+    }
 }

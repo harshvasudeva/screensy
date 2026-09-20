@@ -41,6 +41,11 @@ interface MessageView extends TurnFields {
     type: "view";
 }
 
+interface MessageError {
+    type: "error";
+    reason?: string;
+}
+
 /**
  * Tells the broadcaster a viewer has connected
  */
@@ -99,7 +104,8 @@ type Message =
     | MessageRequestViewers
     | MessageJoin
     | MessageBroadcast
-    | MessageView;
+    | MessageView
+    | MessageError;
 
 interface MessageSender {
     (msg: Message): Promise<void>;
@@ -111,16 +117,12 @@ interface MessageSender {
  * @see https://stackoverflow.com/a/63718685
  */
 function wait(target: EventTarget, listenerName: string): Promise<Event> {
-    // Lambda that returns a listener for the given resolve lambda
-    const listener =
-        (resolve: (value: Event | PromiseLike<Event>) => void) =>
-        (event: Event) => {
-            target.removeEventListener(listenerName, listener(resolve));
+    return new Promise((resolve) => {
+        const listener = (event: Event) => {
+            target.removeEventListener(listenerName, listener);
             resolve(event);
         };
-
-    return new Promise((resolve, _reject) => {
-        target.addEventListener(listenerName, listener(resolve));
+        target.addEventListener(listenerName, listener);
     });
 }
 
@@ -511,6 +513,21 @@ class Room {
 
             this.applyTurnCredentials(messageData);
 
+            if (messageData.type === "error") {
+                showPopup("signaling-error");
+                this.webSocket.close();
+                return;
+            }
+
+            if (
+                messageData.type !== "broadcast" &&
+                messageData.type !== "view"
+            ) {
+                showPopup("signaling-error");
+                this.webSocket.close();
+                return;
+            }
+
             const isBroadcaster = messageData.type === "broadcast";
 
             if (
@@ -672,7 +689,7 @@ function parseSocketPayload(data: unknown): (Message & TurnFields) | null {
 }
 
 function isUsableRoomId(roomId: string): boolean {
-    return /^[A-Za-z0-9_-]{8,128}$/.test(roomId);
+    return /^[A-Za-z0-9_-]{16,128}$/.test(roomId);
 }
 
 /**

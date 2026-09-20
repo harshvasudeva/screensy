@@ -3,7 +3,7 @@ services:
         container_name: screensy-rendezvous
         build: ./screensy-rendezvous
         environment:
-            TURN_AUTH_SECRET: ${TURN_AUTH_SECRET:-screensy-change-me-in-production}
+            TURN_AUTH_SECRET: ${TURN_AUTH_SECRET:?Set TURN_AUTH_SECRET in .env — see .env.example}
             ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
         security_opt:
             - no-new-privileges:true
@@ -53,9 +53,8 @@ services:
         volumes:
             - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
         command:
-            - "-c"
-            - "/etc/coturn/turnserver.conf"
-            - "--static-auth-secret=${TURN_AUTH_SECRET:-screensy-change-me-in-production}"
+            - "--log-file=stdout"
+            - "--static-auth-secret=${TURN_AUTH_SECRET:?Set TURN_AUTH_SECRET in .env — see .env.example}"
         security_opt:
             - no-new-privileges:true
         restart: unless-stopped

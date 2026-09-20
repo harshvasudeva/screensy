@@ -15,7 +15,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 -   Use 128-bit random room ids (the URL fragment is the access token).
 -   Cap rooms, viewers, connections, and WebSocket payload size.
 -   Serve only `screensy.js` and `styles.css` from the website process.
--   Add `/healthz`, security headers, CI, and signaling unit tests.
+-   Close WebSocket connections that never send a valid `join`.
+-   Show an error popup when the signaling server rejects a session.
 
 ### Changed
 
@@ -28,7 +29,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 -   Change the working directory of the Docker container to ensure only
     files needed for screensy are exposed through the browser.
 -   Replace the static `screensy:screensy` TURN password.
--   Deny TURN relays to loopback and private address ranges.
+-   Deny TURN relays to loopback, private, and IPv6 ULA/link-local ranges.
+-   Refuse to start with a missing or placeholder `TURN_AUTH_SECRET`.
 -   Ignore invalid JSON on the client as well as the server.
 -   Stop throwing on concurrent join / missing viewer disconnect.
 

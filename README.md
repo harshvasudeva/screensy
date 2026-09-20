@@ -14,10 +14,12 @@ All traffic (between rendezvous and browser and between browsers) is encrypted
 by default.
 
 A room URL is an access token: anyone who has it can view the screen. New rooms
-use a 128-bit random id. Set `TURN_AUTH_SECRET` (see `.env.example`) to a long
-random value so TURN credentials are time-limited HMAC secrets, not a password
-embedded in JavaScript. HTTP Basic Auth on Caddy does **not** protect the TURN
-port.
+use a 128-bit random id. Copy `.env.example` to `.env` and set `TURN_AUTH_SECRET`
+to a long unique value (at least 24 characters). `docker compose up` will not
+start without it. For a public site also set `ALLOWED_ORIGIN` to your HTTPS
+origin (for example `https://example.com`) so other websites cannot open a
+signaling WebSocket in a visitor’s browser. HTTP Basic Auth on Caddy does
+**not** protect the TURN port.
 
 There are two ways to set up screensy. If you don't know which one to choose, we
 recommend using Docker.
