@@ -1,15 +1,58 @@
 # Screensy — codebase analysis, security review, and improvement scope
 
 **Repository:** self-hosted WebRTC screen sharing (`screensy`)  
-**Version reviewed:** 1.9.0 (last changelog entry 2023-02-07)  
+**Fork:** `harshvasudeva/screensy` ← **upstream:** `screensy/screensy`  
+**Sync checked:** 2026-09-20 — fork `main` and `development` match upstream (0 ahead / 0 behind).  
+**Version reviewed in depth:** **1.9.0 on `main`** (that is also GitHub’s default clone). Unreleased work lives on `development` (see §0).  
 **Review date:** 2026-09-20  
-**Method:** full source and config review; `npm audit` on `screensy-rendezvous`; `govulncheck` on `screensy-website` (with a generated `go.sum`). Opsera MCP scanners were not available (auth required).
+**Method:** full source and config review of `main`; `npm audit` on rendezvous lockfiles for `main`, `development`, and fork `deps-upgrade-latest`; `govulncheck` on website (generated `go.sum` for `main`). Opsera MCP scanners were not available (auth required).
 
-**Overall risk for an internet-facing instance: high.** The design is a small, honest P2P signaling stack, but authorization is effectively “know the room name,” TURN credentials are public, and runtimes/images are years past security support.
+**Overall risk for an internet-facing instance: high** on both `main` and `development`. Dependency/image work on `development` **does not** change room or TURN authorization.
 
 This document is analysis and a backlog. It does not change application behavior.
 
 ---
+
+## 0. Fork sync and upstream `development` (unreleased)
+
+### Sync result
+
+| Ref | Fork SHA | Upstream SHA | Result |
+| --- | --- | --- | --- |
+| `main` (default) | `b23e146` | `b23e146` | Already identical. Last upstream `main` merge: 2023-02-20 (release 1.9.0). |
+| `development` | `f206edb` | `f206edb` | Already identical. Last commit 2024-11-18. |
+
+No merge or push to `main`/`development` was required. The fork also has a **local-only** branch `deps-upgrade-latest` (`9b7d233`) that is **not** on upstream.
+
+`main` is what `git clone` and this review originally used. **Nine commits on `development` have never been released to `main`.**
+
+### What `development` adds vs 1.9.0 `main`
+
+Commits (oldest first): Polish translation; dependency/Compose bump; Polish copy fix; drop Compose `version:` / default network mapping; changelog wording; **WORKDIR `/home/screensy`** so `http.FileServer(".")` no longer serves the container root (upstream issue [#53](https://github.com/screensy/screensy/issues/53)); changelog “UNRELEASED”.
+
+| Area | `main` (1.9.0) | `development` (unreleased) | Effect on this review |
+| --- | --- | --- | --- |
+| `ws` | 7.4.6 | **8.18.0** | Closes the old header-DoS advisory; **still** `npm audit` high: GHSA-58qx-3vcg-4xpx (uninit memory, 8.0.0–8.20.1) and GHSA-96hv-2xvq-fx4p (fragment DoS). |
+| `golang.org/x/text` | v0.3.6, no `go.sum` | **v0.17.0** + `go.sum` | **Fixes S-06** (Accept-Language DoS/OOB). |
+| Node / Alpine (app images) | 14.16 / 3.13 | **22.6 / 3.19** | Large EOL burn-down (**S-07** partial). |
+| Go build image | 1.15 | **1.22.6** (`go.mod` 1.21.13) | Stdlib much newer; still not current patch. |
+| Caddy | 2.3.0-alpine | **2.8.4** | Closes several proxy-era issues (**S-07** partial). |
+| Coturn | 4.5.2 | **4.6.2** | Newer, still far from 4.16. Host network **unchanged** (S-08). |
+| File server | CWD `/` → whole image browsable (`//`) | `WORKDIR /home/screensy` | **Partial S-10:** no longer lists `/bin`/`/etc`. Still serves `screensy.ts`, `.js.map`, and the Go binary. Still **root**. |
+| Compose | file version 3.3 | `no-new-privileges:true`, container names | Defense-in-depth; no resource limits still. |
+| Product | 9 locales | + **Polish** | Feature only. |
+| Signaling / rooms / TURN / client | same `server.ts`, `screensy.ts`, `Caddyfile`, `turnserver.conf` | **unchanged** | **S-01, S-02, S-03, S-04, S-09, S-11, S-12, S-13 still open.** |
+
+### Fork branch `deps-upgrade-latest` (not upstream)
+
+One extra commit on top of `development`: newer pins (`ws@8.21.1`, `x/text v0.40.0`, Go **1.26.5**, Node **24.18.1-alpine3.24**, Alpine **3.24.1**, Caddy **2.11.4**, Coturn **4.16.0**, TypeScript 7). `npm audit --omit=dev` on that lockfile: **0 vulnerabilities**. Same application source and same TURN/room model.
+
+### Verdict on “does upstream fix it?”
+
+Upstream `development` **fixes or reduces** S-06, much of S-07, and the worst part of S-10 (container-root listing). It **adds** a locale and Compose hardening. It **does not** fix guessable rooms, public TURN, unbounded signaling, or the `newRoom` race. Default **`main` still ships 1.9.0** — clone-from-GitHub users do not get the `development` security work until that branch is released.
+
+---
+
 
 ## 1. What the product is
 
@@ -195,12 +238,14 @@ These are the only items that change the threat model for a public host.
 
 ### P2 — dependency and image burn-down (CVE)
 
-9. `ws` → **> 7.5.10** (or 8.x) so both current advisories are closed; keep lockfile in sync.  
-10. `golang.org/x/text` → **≥ 0.3.8** (current 0.x preferred); add **`go.sum`**.  
-11. Rebuild: supported **Go** (1.22+), **Node 20/22**, current Alpine, **Caddy 2.8+**, **coturn 4.15+**. Pin images by digest.  
-12. Website: non-root `USER`; do not copy `.ts` / `.js.map` / the binary name into the web root; allowlist files.  
+On **`development`**, items 10 and much of 11 are already done (see §0). Remaining on that branch: bump `ws` past 8.20.1 (8.21+ closes the remaining audit findings), pin image **digests**, Coturn 4.15+, website non-root and an allowlist so `.ts`/maps/binary are not served, CI scanners. **Merging `development` → `main`** is the first mechanical step so default clone is not stuck on 1.9.0.
+
+9. `ws` → **≥ 8.21** (or current 8.x) so GHSA-58qx-3vcg-4xpx and GHSA-96hv-2xvq-fx4p are closed; keep lockfile in sync. (`main` is still 7.4.6.)  
+10. `golang.org/x/text` → **≥ 0.3.8**; add **`go.sum`**. (Done on `development` at v0.17.0.)  
+11. Rebuild: supported **Go**, **Node 20+**, current Alpine, **Caddy 2.8+**, **coturn 4.15+**. Pin images by digest. (`development` has Go 1.22.6 / Node 22.6 / Caddy 2.8.4 / Coturn 4.6.2.)  
+12. Website: non-root `USER`; do not copy `.ts` / `.js.map` / the binary into the web root; allowlist files. (`development` only changed `WORKDIR`.)  
 13. CI: `npm audit`, `govulncheck`, image scan (Trivy/Grype).  
-    *Touch:* Dockerfiles, `go.mod`, `package.json`, new CI. Mechanical but needs smoke-test of WebRTC.
+    *Touch:* Dockerfiles, `go.mod`, `package.json`, new CI. Mechanical but needs smoke-test of WebRTC. Fork branch `deps-upgrade-latest` already experiments with current pins (`ws` 8.21.1, zero `npm audit` findings).
 
 ### P3 — browser, proxy, product hygiene
 
@@ -224,10 +269,10 @@ screensy-rendezvous/server.ts      signaling
 screensy-rendezvous/package.json   ws 7.4.6
 screensy-website/screensy.ts       browser client
 screensy-website/main.go           static + i18n
-screensy-website/translations/     9 HTML locales
+screensy-website/translations/     9 HTML locales on main; 10 on development (pl)
 screensy-website/styles.css
 Caddyfile, docker-compose.yaml, turnserver.conf
-Dockerfiles (Node 14.16, Go 1.15, Alpine 3.13)
+Dockerfiles (main: Node 14.16, Go 1.15, Alpine 3.13)
 ```
 
 No other application languages or data stores.
