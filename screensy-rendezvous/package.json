@@ -2,6 +2,11 @@
     "name": "screensy-rendezvous",
     "description": "The signaling server for screensy",
     "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "build": "tsc",
+        "test": "tsc && node --test protocol.test.js turn.test.js server.test.js"
+    },
     "repository": {
         "type": "git",
         "url": "git+https://github.com/screensy/screensy.git"
@@ -13,11 +18,11 @@
     "license": "GPL-3.0-or-later",
     "homepage": "https://github.com/screensy/screensy#readme",
     "devDependencies": {
-        "@types/node": "^24.13.3",
+        "@types/node": "^24.13.6",
         "@types/ws": "^8.18.1",
         "typescript": "^7.0.2"
     },
     "dependencies": {
-        "ws": "^8.21.1"
+        "ws": "^8.21.3"
     }
 }

@@ -1,15 +1,11 @@
 {
     "compilerOptions": {
         "module": "ES2015",
-        "target": "ES2015",
-        "sourceMap": true,
-        "noImplicitAny": true,
-        "noImplicitThis": true,
-        "strictNullChecks": true,
-        "alwaysStrict": true,
-        "strictFunctionTypes": true,
+        "target": "ES2017",
+        "sourceMap": false,
         "strict": true,
-        "removeComments": false
+        "skipLibCheck": true,
+        "lib": ["ES2017", "DOM"]
     },
     "files": ["screensy.ts"]
 }

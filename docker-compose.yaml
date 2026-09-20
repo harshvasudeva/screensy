@@ -2,8 +2,16 @@ services:
     rendezvous:
         container_name: screensy-rendezvous
         build: ./screensy-rendezvous
+        environment:
+            TURN_AUTH_SECRET: ${TURN_AUTH_SECRET:-screensy-change-me-in-production}
+            ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
         security_opt:
             - no-new-privileges:true
+        read_only: true
+        tmpfs:
+            - /tmp
+        mem_limit: 256m
+        cpus: "1.0"
         restart: unless-stopped
 
     website:
@@ -11,27 +19,47 @@ services:
         build: ./screensy-website
         security_opt:
             - no-new-privileges:true
+        read_only: true
+        tmpfs:
+            - /tmp
+        mem_limit: 128m
+        cpus: "0.50"
         restart: unless-stopped
 
     caddy:
-        image: caddy:2.11.4
+        image: caddy:2.11.4-alpine
         container_name: screensy-caddy
         ports:
             - "80:80"
             - "443:443"
         volumes:
-            - "./Caddyfile:/etc/caddy/Caddyfile"
+            - ./Caddyfile:/etc/caddy/Caddyfile:ro
+            - caddy_data:/data
+            - caddy_config:/config
+        security_opt:
+            - no-new-privileges:true
+        mem_limit: 256m
+        cpus: "1.0"
+        restart: unless-stopped
+        depends_on:
+            - website
+            - rendezvous
+
+    turn:
+        image: coturn/coturn:4.18.0
+        container_name: screensy-turn
+        # Host network is required for the UDP relay port range.
+        network_mode: host
+        volumes:
+            - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+        command:
+            - "-c"
+            - "/etc/coturn/turnserver.conf"
+            - "--static-auth-secret=${TURN_AUTH_SECRET:-screensy-change-me-in-production}"
         security_opt:
             - no-new-privileges:true
         restart: unless-stopped
 
-    turn:
-        image: coturn/coturn:4.16.0
-        container_name: screensy-turn
-        # Use the host network directly as Docker performs badly with large port ranges.
-        network_mode: host
-        volumes:
-            - "./turnserver.conf:/etc/coturn/turnserver.conf"
-        security_opt:
-            - no-new-privileges:true
-        restart: unless-stopped
+volumes:
+    caddy_data:
+    caddy_config:

@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,20 +20,22 @@ type globalState struct {
 	matcher   language.Matcher
 }
 
+const csp = "default-src 'self'; connect-src 'self' ws: wss:; media-src 'self' blob:; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
 func main() {
 	const port = 8080
-
-	// This webserver only deals with very small requests; 5 seconds should be plenty
 	const timeout = 5 * time.Second
 
 	state.fileCache, state.matcher = fetchTranslations()
 
 	server := http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      http.HandlerFunc(getServer(http.FileServer(http.Dir(".")))),
-		ReadTimeout:  timeout,
-		WriteTimeout: timeout,
-		IdleTimeout:  timeout,
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           http.HandlerFunc(serve),
+		ReadTimeout:       timeout,
+		WriteTimeout:      timeout,
+		IdleTimeout:       timeout,
+		ReadHeaderTimeout: timeout,
+		MaxHeaderBytes:    16 << 10,
 	}
 
 	log.Printf("Server started on port %d", port)
@@ -42,60 +44,68 @@ func main() {
 }
 
 func fetchTranslations() ([][]byte, language.Matcher) {
-	// Get the filepaths of all translations
 	filePaths, err := filepath.Glob("./translations/*.html")
-
-	if err == filepath.ErrBadPattern {
+	if err != nil {
 		panic("Invalid pattern during fetchTranslations")
 	}
 
-	// Print a list of all found translation filepaths
 	log.Printf("Registering the following %d translation files:", len(filePaths))
 	for idx, filePath := range filePaths {
 		log.Printf("%3d. %s\n", idx+1, filePath)
 	}
 
-	// Prepend "translations/en.html" to the filepaths, because it serves as
-	// the ultimate fallback
 	filePaths = append([]string{"translations/en.html"}, filePaths...)
 
 	numTranslations := len(filePaths)
-	fileNames := make([]string, numTranslations, numTranslations)
-	fileCache := make([][]byte, numTranslations, numTranslations)
-	languageTags := make([]language.Tag, numTranslations, numTranslations)
+	fileCache := make([][]byte, numTranslations)
+	languageTags := make([]language.Tag, numTranslations)
 
 	for idx, filePath := range filePaths {
-
-		// Get the filename (with extension)
-		fileNames[idx] = filepath.Base(filePath)
-
-		// Read the content of the file into the cache
-		fileCache[idx], err = ioutil.ReadFile(filePath)
+		fileCache[idx], err = os.ReadFile(filePath)
 		if err != nil {
 			panic("Could not read localisation file " + filePath)
 		}
 
-		// Get the basename (file name without extension)
-		baseName := strings.TrimSuffix(fileNames[idx], filepath.Ext(fileNames[idx]))
-
-		// Parse the basename as a language tag
+		fileName := filepath.Base(filePath)
+		baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 		languageTags[idx] = language.MustParse(baseName)
 	}
 
 	return fileCache, language.NewMatcher(languageTags)
 }
 
-func getServer(fileServer http.Handler) func(writer http.ResponseWriter, request *http.Request) {
-	return func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/" || request.URL.Path == "/index.html" {
-			acceptLanguageHeader := request.Header.Get("Accept-Language")
-			tags, _, _ := language.ParseAcceptLanguage(acceptLanguageHeader)
-			_, idx, _ := state.matcher.Match(tags...)
-			fileContent := state.fileCache[idx]
+func writeSecurityHeaders(writer http.ResponseWriter) {
+	header := writer.Header()
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("Referrer-Policy", "no-referrer")
+	header.Set("Content-Security-Policy", csp)
+	header.Set("Permissions-Policy", "camera=(), microphone=(), display-capture=(self), geolocation=()")
+	header.Set("Cache-Control", "no-store")
+}
 
-			http.ServeContent(writer, request, "index.html", time.Time{}, bytes.NewReader(fileContent))
-		} else {
-			fileServer.ServeHTTP(writer, request)
-		}
+func serve(writer http.ResponseWriter, request *http.Request) {
+	writeSecurityHeaders(writer)
+
+	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	switch request.URL.Path {
+	case "/healthz":
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write([]byte("ok"))
+	case "/", "/index.html":
+		acceptLanguageHeader := request.Header.Get("Accept-Language")
+		tags, _, _ := language.ParseAcceptLanguage(acceptLanguageHeader)
+		_, idx, _ := state.matcher.Match(tags...)
+		http.ServeContent(writer, request, "index.html", time.Time{}, bytes.NewReader(state.fileCache[idx]))
+	case "/screensy.js":
+		http.ServeFile(writer, request, "screensy.js")
+	case "/styles.css":
+		http.ServeFile(writer, request, "styles.css")
+	default:
+		http.NotFound(writer, request)
 	}
 }

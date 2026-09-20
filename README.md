@@ -13,6 +13,12 @@ directly sent from the browser of the broadcaster to the browser of each viewer.
 All traffic (between rendezvous and browser and between browsers) is encrypted
 by default.
 
+A room URL is an access token: anyone who has it can view the screen. New rooms
+use a 128-bit random id. Set `TURN_AUTH_SECRET` (see `.env.example`) to a long
+random value so TURN credentials are time-limited HMAC secrets, not a password
+embedded in JavaScript. HTTP Basic Auth on Caddy does **not** protect the TURN
+port.
+
 There are two ways to set up screensy. If you don't know which one to choose, we
 recommend using Docker.
 
@@ -31,12 +37,26 @@ recommend using Docker.
         git clone https://github.com/screensy/screensy.git
         cd screensy/
 
-4.  Change the first line of the included Caddyfile to your domain. For example
+4.  Copy `.env.example` to `.env` and set `TURN_AUTH_SECRET` to a long random
+    string. The rendezvous server and Coturn must use the same value.
+
+5.  Change the first line of the included Caddyfile to your domain. For example
     if you want to host screensy on the domain "example.com", use this
-    Caddyfile:
+    Caddyfile (keep the `header { ... }` block from the repo file, and proxy
+    the website on port **8080**):
 
         example.com {
-            reverse_proxy website:80
+            header {
+                X-Content-Type-Options nosniff
+                X-Frame-Options DENY
+                Referrer-Policy no-referrer
+                Strict-Transport-Security "max-age=31536000; includeSubDomains"
+                Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss:; media-src 'self' blob:; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+                Permissions-Policy "camera=(), microphone=(), display-capture=(self), geolocation=()"
+                -Server
+            }
+
+            reverse_proxy website:8080
 
             @rendezvous {
                 header Connection *Upgrade*
@@ -46,10 +66,10 @@ recommend using Docker.
             reverse_proxy @rendezvous rendezvous:4000
         }
 
-5.  _Optional_: password-protect your screensy instance using the method
-    described at the bottom of this document.
+6.  _Optional_: password-protect your screensy instance using the method
+    described at the bottom of this document. This does not lock down TURN.
 
-6.  Change the value of the "external-ip" setting in the included
+7.  Change the value of the "external-ip" setting in the included
     "turnserver.conf" from "localhost" to your domain. For example if you want
     to host screensy on the domain "example.com", the first two lines of your
     "turnserver.conf" should look like this:
@@ -57,13 +77,13 @@ recommend using Docker.
         # Set the value below to your public IP address or domain.
         external-ip=example.com
 
-7.  Make sure the required ports are accessible. We listed these ports at the
+8.  Make sure the required ports are accessible. We listed these ports at the
     bottom of this document.
 
-8.  Start the Docker containers using Docker Compose, by running the following
+9.  Start the Docker containers using Docker Compose, by running the following
     command:
 
-        docker-compose up -d
+        docker compose up -d
 
 ## Server Setup (Without Docker)
 
@@ -107,27 +127,22 @@ recommend using Docker.
     This starts the webserver on port 8080. We do not use the standard port "80"
     for this, as it will conflict with the reverse proxy we will set up in step 10.
 
-8.  Set up the STUN and TURN server. Use the long-term credential mechanism
-    with the username "screensy" and the password "screensy". We use the
-    following "turnserver.conf" for this:
-
-        external-ip=example.com
-        listening-port=3478
-        user=screensy:screensy
-        lt-cred-mech
-        realm=screensy
+8.  Set up the STUN and TURN server with Coturn's TURN REST (HMAC) auth. Use
+    the same secret as `TURN_AUTH_SECRET` for the rendezvous process. A starting
+    `turnserver.conf` is in this repository (`use-auth-secret`, private-IP
+    denylist). Pass the secret with `--static-auth-secret`.
 
 9.  Start the rendezvous server located in "screensy-rendezvous" directory,
     using the following commands:
 
         cd screensy-rendezvous
-        npm install --only=production
-        node server.js
+        npm ci --omit=dev
+        TURN_AUTH_SECRET=your-secret node server.js
 
     This starts a WebSocket server on port 4000.
 
 10. Reverse proxy both the static file server and the rendezvous server. We use
-    the following Caddyfile for this:
+    the following Caddyfile for this (website listens on **8080**):
 
         example.com {
             reverse_proxy localhost:8080

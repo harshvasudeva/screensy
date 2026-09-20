@@ -28,6 +28,19 @@ interface MessageJoin {
     roomId: string;
 }
 
+interface TurnFields {
+    turnUsername?: string;
+    turnCredential?: string;
+}
+
+interface MessageBroadcast extends TurnFields {
+    type: "broadcast";
+}
+
+interface MessageView extends TurnFields {
+    type: "view";
+}
+
 /**
  * Tells the broadcaster a viewer has connected
  */
@@ -84,7 +97,9 @@ type Message =
     | MessageWebRTCViewer
     | MessageWebRTCBroadcaster
     | MessageRequestViewers
-    | MessageJoin;
+    | MessageJoin
+    | MessageBroadcast
+    | MessageView;
 
 interface MessageSender {
     (msg: Message): Promise<void>;
@@ -184,12 +199,7 @@ class Broadcaster implements Client {
     /**
      * @inheritDoc
      */
-    async handleMessage(
-        msg:
-            | MessageViewer
-            | MessageViewerDisconnected
-            | MessageWebRTCBroadcaster
-    ): Promise<void> {
+    async handleMessage(msg: Message): Promise<void> {
         switch (msg.type) {
             case "viewer":
                 await this.addViewer(msg.viewerId);
@@ -363,9 +373,7 @@ class Viewer implements Client {
     /**
      * @inheritDoc
      */
-    async handleMessage(
-        msg: MessageBroadcasterDisconnected | MessageWebRTCViewer
-    ): Promise<void> {
+    async handleMessage(msg: Message): Promise<void> {
         switch (msg.type) {
             case "broadcasterdisconnected":
                 await this.handleBroadcasterDisconnect();
@@ -470,7 +478,7 @@ class Room {
         this.videoElement = <HTMLVideoElement>document.getElementById("stream");
 
         const webSocketProtocol =
-            window.location.protocol === "http" ? "ws" : "wss";
+            window.location.protocol === "https:" ? "wss" : "ws";
         const webSocketUrl =
             webSocketProtocol + "://" + location.host + location.pathname;
 
@@ -480,14 +488,7 @@ class Room {
         this.sendMessage = async (message: Message) =>
             this.webSocket.send(JSON.stringify(message));
         this.rtcConfig = {
-            iceServers: [
-                { urls: "stun:" + location.hostname },
-                {
-                    urls: "turn:" + location.hostname,
-                    username: "screensy",
-                    credential: "screensy",
-                },
-            ],
+            iceServers: [{ urls: "stun:" + location.hostname }],
             iceCandidatePoolSize: 8,
         };
 
@@ -503,7 +504,13 @@ class Room {
         await wait(this.webSocket, "open");
 
         this.webSocket.onmessage = async (event: MessageEvent) => {
-            const messageData = JSON.parse(event.data);
+            const messageData = parseSocketPayload(event.data);
+            if (messageData == null) {
+                return;
+            }
+
+            this.applyTurnCredentials(messageData);
+
             const isBroadcaster = messageData.type === "broadcast";
 
             if (
@@ -518,8 +525,13 @@ class Room {
                 ? await this.setupBroadcaster()
                 : await this.setupViewer();
 
-            this.webSocket.onmessage = (event: MessageEvent) =>
-                client.handleMessage(JSON.parse(event.data));
+            this.webSocket.onmessage = (event: MessageEvent) => {
+                const payload = parseSocketPayload(event.data);
+                if (payload == null) {
+                    return;
+                }
+                client.handleMessage(payload);
+            };
 
             if (isBroadcaster) {
                 await this.sendMessage({ type: "requestviewers" });
@@ -530,16 +542,32 @@ class Room {
 
         await this.sendMessage({
             type: "join",
-            roomId: this.roomId.toLowerCase(),
+            roomId: this.roomId,
         });
+    }
+
+    private applyTurnCredentials(message: {
+        turnUsername?: string;
+        turnCredential?: string;
+    }): void {
+        if (!message.turnUsername || !message.turnCredential) {
+            return;
+        }
+
+        const iceServers = this.rtcConfig.iceServers || [];
+        iceServers.push({
+            urls: "turn:" + location.hostname,
+            username: message.turnUsername,
+            credential: message.turnCredential,
+        });
+        this.rtcConfig.iceServers = iceServers;
     }
 
     /**
      * Sets the document's title to the room name.
      */
     private setDocumentTitle() {
-        const roomIdWords = this.roomId.split(/(?=[A-Z])/);
-        document.title = roomIdWords.join(" ") + " | screensy";
+        document.title = this.roomId + " | screensy";
     }
 
     /**
@@ -627,204 +655,45 @@ class Room {
     }
 }
 
+function parseSocketPayload(data: unknown): (Message & TurnFields) | null {
+    if (typeof data !== "string") {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(data);
+        if (parsed === null || typeof parsed !== "object") {
+            return null;
+        }
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+function isUsableRoomId(roomId: string): boolean {
+    return /^[A-Za-z0-9_-]{8,128}$/.test(roomId);
+}
+
 /**
- * Generates a random readable room name and returns the words as a string array.
- *
- * @source https://github.com/jitsi/js-utils/blob/master/random/roomNameGenerator.js
+ * 128-bit unguessable room id (hex). The URL fragment is the access capability.
  */
-function generateRoomName(): string {
-    const adjectives = [
-        "large",
-        "small",
-        "beautiful",
-        "heavenly",
-        "red",
-        "yellow",
-        "green",
-        "orange",
-        "purple",
-        "massive",
-        "tasty",
-        "cheap",
-        "fancy",
-        "expensive",
-        "crazy",
-        "round",
-        "triangular",
-        "powered",
-        "blue",
-        "heavy",
-        "square",
-        "rectangular",
-        "lit",
-        "authentic",
-        "broken",
-        "busy",
-        "original",
-        "special",
-        "thick",
-        "thin",
-        "pleasant",
-        "sharp",
-        "steady",
-        "happy",
-        "delighted",
-        "stunning",
-    ];
-
-    const pluralNouns = [
-        "monsters",
-        "people",
-        "cars",
-        "buttons",
-        "vegetables",
-        "students",
-        "computers",
-        "robots",
-        "lamps",
-        "doors",
-        "wizards",
-        "books",
-        "shirts",
-        "pens",
-        "guitars",
-        "bottles",
-        "microphones",
-        "pants",
-        "drums",
-        "plants",
-        "batteries",
-        "barrels",
-        "birds",
-        "coins",
-        "clothes",
-        "deals",
-        "crosses",
-        "devices",
-        "desktops",
-        "diamonds",
-        "fireworks",
-        "funds",
-        "guitars",
-        "pianos",
-        "harmonies",
-        "levels",
-        "mayors",
-        "mechanics",
-        "networks",
-        "ponds",
-        "trees",
-        "proofs",
-        "flowers",
-        "houses",
-        "speakers",
-        "phones",
-        "chargers",
-    ];
-
-    const verbs = [
-        "break",
-        "roll",
-        "flip",
-        "grow",
-        "bake",
-        "create",
-        "cook",
-        "smack",
-        "drink",
-        "close",
-        "display",
-        "run",
-        "move",
-        "flop",
-        "wrap",
-        "enter",
-        "dig",
-        "fly",
-        "swim",
-        "draw",
-        "celebrate",
-        "communicate",
-        "encompass",
-        "forgive",
-        "negotiate",
-        "pioneer",
-        "photograph",
-        "play",
-        "scratch",
-        "stabilize",
-        "weigh",
-        "wrap",
-        "yield",
-        "return",
-        "update",
-        "understand",
-        "propose",
-        "succeed",
-        "stretch",
-        "submit",
-    ];
-
-    const adverbs = [
-        "gingerly",
-        "thoroughly",
-        "heavily",
-        "crazily",
-        "mostly",
-        "fast",
-        "slowly",
-        "merrily",
-        "quickly",
-        "heavenly",
-        "cheerfully",
-        "honestly",
-        "politely",
-        "bravely",
-        "vivaciously",
-        "fortunately",
-        "innocently",
-        "kindly",
-        "eagerly",
-        "elegantly",
-        "vividly",
-        "reasonably",
-        "rudely",
-        "wisely",
-        "thankfully",
-        "wholly",
-        "adorably",
-        "happily",
-        "firmly",
-        "fast",
-        "simply",
-        "wickedly",
-    ];
-
-    const idxAdjective = Math.floor(Math.random() * adjectives.length);
-    const idxPluralNoun = Math.floor(Math.random() * pluralNouns.length);
-    const idxVerb = Math.floor(Math.random() * verbs.length);
-    const idxAdverb = Math.floor(Math.random() * adverbs.length);
-
-    const words = [
-        adjectives[idxAdjective],
-        pluralNouns[idxPluralNoun],
-        verbs[idxVerb],
-        adverbs[idxAdverb],
-    ];
-
-    // @see https://flaviocopes.com/how-to-uppercase-first-letter-javascript/
-    return words
-        .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join("");
+function generateRoomId(): string {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+        ""
+    );
 }
 
 async function main(_event: Event) {
-    if (window.location.hash == "") {
-        // Redirect the user to a room
-        window.location.replace("#" + generateRoomName());
+    const currentId = window.location.hash.substring(1);
+
+    if (!isUsableRoomId(currentId)) {
+        window.location.replace("#" + generateRoomId());
+        return;
     }
 
-    // If the user manually changes the hash, force a reload
     window.onhashchange = (_event: Event) => {
         location.reload();
     };
@@ -844,7 +713,7 @@ async function main(_event: Event) {
         return;
     }
 
-    const room = new Room(window.location.hash.substring(1));
+    const room = new Room(currentId);
     await room.join();
 }
 

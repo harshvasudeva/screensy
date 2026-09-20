@@ -11,15 +11,26 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 -   Add the Polish translation.
 -   Enable the `no-new-privileges` option in the `docker-compose.yaml` file.
+-   Mint time-limited TURN REST credentials from the signaling server.
+-   Use 128-bit random room ids (the URL fragment is the access token).
+-   Cap rooms, viewers, connections, and WebSocket payload size.
+-   Serve only `screensy.js` and `styles.css` from the website process.
+-   Add `/healthz`, security headers, CI, and signaling unit tests.
 
 ### Changed
 
--   Upgrade dependencies.
+-   Upgrade Node, Go, Caddy, Coturn, `ws`, and `golang.org/x/text` to current releases.
+-   Run the website container as a non-root user; do not ship TypeScript or source maps.
+-   Select `ws` vs `wss` from `location.protocol` (`http:` / `https:`).
 
 ### Security
 
 -   Change the working directory of the Docker container to ensure only
     files needed for screensy are exposed through the browser.
+-   Replace the static `screensy:screensy` TURN password.
+-   Deny TURN relays to loopback and private address ranges.
+-   Ignore invalid JSON on the client as well as the server.
+-   Stop throwing on concurrent join / missing viewer disconnect.
 
 ## 1.9.0 - 2023-02-07
 
